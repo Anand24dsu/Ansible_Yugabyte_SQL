@@ -1,0 +1,117 @@
+---
+- name: Insert data into YugabyteDB using Ansible
+  hosts: all
+  gather_facts: false
+  vars:
+    db_name: testdb
+    db_user: yugabyte
+    db_password: yugabyte
+    # Use internal IP address instead of ansible_host
+    db_host: "10.128.0.57"
+    db_port: 5433
+    create_db_if_not_exists: true
+
+  tasks:
+    - name: Check if YugabyteDB port is reachable
+      wait_for:
+        host: "{{ db_host }}"
+        port: "{{ db_port }}"
+        timeout: 10
+      register: port_check
+      ignore_errors: true
+
+    - name: Display connection status
+      debug:
+        msg: "YugabyteDB port status: {{ 'Reachable' if port_check.state is defined and port_check.state == 'started' else 'Unreachable' }}"
+
+    - name: Ensure database exists
+      community.postgresql.postgresql_db:
+        name: "{{ db_name }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+        login_host: "{{ db_host }}"
+        login_port: "{{ db_port }}"
+        state: present
+      when: create_db_if_not_exists and (port_check.state is defined and port_check.state == 'started')
+      register: db_creation
+      ignore_errors: true
+
+    - name: Ensure the test table exists
+      community.postgresql.postgresql_query:
+        db: "{{ db_name }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+        login_host: "{{ db_host }}"
+        login_port: "{{ db_port }}"
+        query: >
+           CREATE TABLE IF NOT EXISTS categories (
+           category_id smallint NOT NULL PRIMARY KEY,
+           category_name character varying(15) NOT NULL,
+           description text,
+           picture bytea
+           );
+           CREATE TABLE IF NOT EXISTS customer_demographics (
+           customer_type_id bpchar NOT NULL PRIMARY KEY,
+           customer_desc text
+           );
+           CREATE TABLE IF NOT EXISTS customers (
+           customer_id bpchar NOT NULL PRIMARY KEY,
+           company_name character varying(40) NOT NULL,
+           contact_name character varying(30),
+           contact_title character varying(30),
+           address character varying(60),
+           city character varying(15),
+           region character varying(15),
+           postal_code character varying(10),
+           country character varying(15),
+           phone character varying(24),
+           fax character varying(24)
+           );
+           CREATE TABLE IF NOT EXISTS customer_customer_demo (
+           customer_id bpchar NOT NULL,
+           customer_type_id bpchar NOT NULL,
+           PRIMARY KEY (customer_id, customer_type_id),
+           FOREIGN KEY (customer_type_id) REFERENCES customer_demographics,
+           FOREIGN KEY (customer_id) REFERENCES customers
+           );
+      when: port_check.state is defined and port_check.state == 'started'
+      register: table_creation
+    
+    - name: Insert sample rows into categories table
+      community.postgresql.postgresql_query:
+        db: "{{ db_name }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+        login_host: "{{ db_host }}"
+        login_port: "{{ db_port }}"
+        query: >
+          INSERT INTO public.categories (category_id, category_name, description, picture)
+          VALUES
+          (18, 'Beverages1', 'Soft drinks, coffees, teas, beers, and ales', '\x'),
+          (19, 'Condiments1', 'Sweet and savory sauces, relishes, spreads, and seasonings', '\x'),
+          (20, 'Confections1', 'Desserts, candies, and sweet breads', '\x'),
+          (21, 'Dairy Products1', 'Cheeses', '\x'),
+          (22, 'Grains/Cereals1', 'Breads, crackers, pasta, and cereal', '\x'),
+          (23, 'Meat/Poultry1', 'Prepared meats', '\x'),
+          (24, 'Produce1', 'Dried fruit and bean curd', '\x'),
+          (25, 'Seafood1', 'Seaweed and fish', '\x');
+      when: port_check.state is defined and port_check.state == 'started' and
+            (table_creation is succeeded or table_creation is skipped)
+      register: insert_result
+      
+    - name: Verify data was inserted
+      community.postgresql.postgresql_query:
+        db: "{{ db_name }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+        login_host: "{{ db_host }}"
+        login_port: "{{ db_port }}"
+        query: "SELECT * FROM public.categories;"
+      register: query_result
+      when: port_check.state is defined and port_check.state == 'started'
+      ignore_errors: true
+
+    - name: Display query results
+      debug:
+        var: query_result.query_result
+      when: query_result is defined and query_result.query_result is defined
