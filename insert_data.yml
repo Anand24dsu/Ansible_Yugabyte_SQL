@@ -6,7 +6,6 @@
     db_name: testdb
     db_user: yugabyte
     db_password: yugabyte
-    # Use internal IP address instead of ansible_host
     db_host: "10.128.15.223"
     db_port: 5433
     create_db_if_not_exists: true
